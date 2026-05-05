@@ -47,6 +47,21 @@
           "Microsoft.Extensions.Primitives": "5.0.1"
         }
       },
+      "SoundFlow.Codecs.FFMpeg": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "lp+y6joRjqqlR/UFaH4TptforIF2b18O/LXOvuLj/oX6RZy6U8IG8c3Nc1S2aOCX017YtI7yo7kLAZysPlc2VQ==",
+        "dependencies": {
+          "SoundFlow": "1.4.0"
+        }
+      },
+      "SoundTouch.Net": {
+        "type": "Direct",
+        "requested": "[2.3.2, )",
+        "resolved": "2.3.2",
+        "contentHash": "5A29Pll/n4kEEPvCD5DFot3MJG+VgiaRG6LbNQVkF94VerC1b5iZtJKfdLQXZPFrl3LiVbKm3txKBe5/pbv5rw=="
+      },
       "sqlite-net-pcl": {
         "type": "Direct",
         "requested": "[1.9.172, )",
@@ -85,6 +100,11 @@
         "type": "Transitive",
         "resolved": "14.0.0",
         "contentHash": "jGOuTH1l+TCpJH+fwYOp7USzHDuGfN1jKbLz3J2COwyn+wL08eynvpnM6rY2qkzIEXum3PN2p2QkP3BW/p9Qcw=="
+      },
+      "SoundFlow": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "PVc8NEpwmx16qJdOGRvc7Kpvs/3hNZBuldErmnMQSh9IClAA2UWrafcUIQUxki2GrWB2g71hPSDIUKEo3nRgeA=="
       },
       "SQLitePCLRaw.bundle_green": {
         "type": "Transitive",

@@ -5,7 +5,7 @@ public partial class Lobby : Node
 {
     public static Lobby Instance;
 
-    public static List<Player> Players = [];
+    //public static List<Player> Players = [];
 
     public static int PlayersReady = 0;
 
@@ -63,12 +63,12 @@ public partial class Lobby : Node
 
     public static void Enter()
     {
-        AddPlayer(new("You"));
+        //AddPlayer(new("You"));
     }
 
     public static void Leave()
     {
-        Players = [];
+        //Players = [];
     }
 
     public static void PlayerReady(string name, bool ready = true)
@@ -83,12 +83,12 @@ public partial class Lobby : Node
         //     Players[name].Ready = ready;
         // }
 
-        PlayersReady += ready ? 1 : -1;
+        //PlayersReady += ready ? 1 : -1;
 
-        if (PlayersReady == Players.Count)
-        {
-            Instance.EmitSignal(SignalName.AllReady);
-        }
+        //if (PlayersReady == Players.Count)
+        //{
+        //    Instance.EmitSignal(SignalName.AllReady);
+        //}
     }
 
     public static void PlayerUnready(string name)
@@ -96,15 +96,15 @@ public partial class Lobby : Node
         PlayerReady(name, false);
     }
 
-    public static void AddPlayer(Player player)
-    {
-        Players.Add(player);
-    }
+    //public static void AddPlayer(Player player)
+    //{
+    //    Players.Add(player);
+    //}
 
-    public static void RemovePlayer(Player player)
-    {
-        Players.Remove(player);
-    }
+    //public static void RemovePlayer(Player player)
+    //{
+    //    Players.Remove(player);
+    //}
 
     public static void SetMap(Map map)
     {
