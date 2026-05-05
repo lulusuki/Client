@@ -607,7 +607,7 @@ public partial class LegacyRunner : BaseScene
         replayViewerPause.Pressed += () =>
         {
             Playing = !Playing;
-            SoundManager.Song.PitchScale = Playing ? (float)CurrentAttempt.Speed : 0.00000000000001f;   // ooohh my goood
+            SoundManager.Song.Tempo = Playing ? (float)CurrentAttempt.Speed : 0.00000000000001f;   // ooohh my goood
             replayViewerPause.TextureNormal = GD.Load<Texture2D>(Playing ? "res://textures/pause.png" : "res://textures/play.png");
         };
 
@@ -662,13 +662,13 @@ public partial class LegacyRunner : BaseScene
                 }
             }
 
-            if (!SoundManager.Song.Playing)
+            if (!SoundManager.Song.IsPlaying)
             {
                 SoundManager.Song.Play();
             }
 
             double audioTime = Math.Max(0, CurrentAttempt.Progress + settings.LocalOffset.Value);
-            SoundManager.Song.Seek((float)audioTime / 1000);
+            SoundManager.Song.Seek((float)audioTime);
         };
         replayViewerSeek.FocusEntered += () =>
         {
@@ -786,9 +786,10 @@ public partial class LegacyRunner : BaseScene
 
         if (CurrentAttempt.Map.AudioBuffer != null)
         {
-            SoundManager.Song.Stream = Util.Audio.LoadStream(CurrentAttempt.Map.AudioBuffer);
-            SoundManager.Song.PitchScale = (float)CurrentAttempt.Speed;
-            SoundManager.Song.VolumeDb = getTargetMusicVolumeDb();
+            SoundManager.Song.Load(CurrentAttempt.Map.AudioBuffer);
+            SoundManager.Song.Tempo = (float)CurrentAttempt.Speed;
+            // TODO: change targetMusicVolumeDB();
+            // SoundManager.Song.Volume = getTargetMusicVolumeDb();
             SoundManager.Song.Stop();
         }
 
@@ -796,7 +797,7 @@ public partial class LegacyRunner : BaseScene
 
         if (CurrentAttempt.Map.AudioBuffer != null)
         {
-            MapLength = (float)SoundManager.Song.Stream.GetLength() * 1000;
+            MapLength = SoundManager.Song.TotalTime.Milliseconds;
         }
         else
         {
@@ -925,15 +926,15 @@ public partial class LegacyRunner : BaseScene
         }
         else if (CurrentAttempt.Progress > 0 && CurrentAttempt.Progress < MapLength && !CurrentAttempt.Stopped)
         {
-            double audioDelay = CurrentAttempt.Progress - 1000 * (SoundManager.Song.GetPlaybackPosition() + AudioServer.GetTimeSinceLastMix());
+            double audioDelay = CurrentAttempt.Progress - 1000 * SoundManager.Song.CurrentTime.Milliseconds;
 
             if (Math.Abs(audioDelay / CurrentAttempt.Speed) > Math.Max(40, delta))
             {
-                SoundManager.Song.PitchScale = (float)Math.Clamp(CurrentAttempt.Speed + audioDelay / 1000, Math.Max(0.01, CurrentAttempt.Speed - 0.5), CurrentAttempt.Speed + 0.5);
+                SoundManager.Song.Tempo = Math.Max(Mathf.Epsilon, (float)CurrentAttempt.Speed + (float)audioDelay / 1000);
             }
-            else if (Math.Abs(SoundManager.Song.PitchScale - CurrentAttempt.Speed) > Mathf.Epsilon)
+            else if (Math.Abs(SoundManager.Song.Tempo - CurrentAttempt.Speed) > Mathf.Epsilon)
             {
-                SoundManager.Song.PitchScale = (float)CurrentAttempt.Speed;
+                SoundManager.Song.Tempo = (float)CurrentAttempt.Speed;
             }
         }
 
@@ -1036,7 +1037,7 @@ public partial class LegacyRunner : BaseScene
         CurrentAttempt.Progress += delta * 1000 * CurrentAttempt.Speed;
         CurrentAttempt.Skippable = false;
 
-        startGameplayMediaAtExpected(isPauseRampActive() ? SoundManager.Song.VolumeDb : getTargetMusicVolumeDb());
+        startGameplayMediaAtExpected(isPauseRampActive() ? SoundManager.Song.Volume : getTargetMusicVolumeDb());
 
         int nextNoteMillisecond = CurrentAttempt.PassedNotes >= CurrentAttempt.Map.Notes.Length ? (int)MapLength + 5000 : CurrentAttempt.Map.Notes[CurrentAttempt.PassedNotes].Millisecond;
         int lastNoteMillisecond = CurrentAttempt.PassedNotes > 0 ? CurrentAttempt.Map.Notes[CurrentAttempt.PassedNotes - 1].Millisecond : 0;
@@ -1308,13 +1309,12 @@ public partial class LegacyRunner : BaseScene
                         if (CurrentAttempt.IsReplay)
                         {
                             Playing = !Playing;
-                            // SoundManager.Song.PitchScale = Playing ? (float)CurrentAttempt.Speed : 0.00000000000001f;   // ooohh my goood
-                            SoundManager.Song.StreamPaused = !Playing;
+                            SoundManager.Song.Tempo = Playing ? (float)CurrentAttempt.Speed : 0.00000000000001f;   // ooohh my goood
                             replayViewerPause.TextureNormal = GD.Load<Texture2D>(Playing ? "res://textures/ui/pause.png" : "res://textures/ui/play.png");
                         }
                         else
                         {
-                            if (Lobby.Players.Count > 1) break;
+                            // if (Lobby.Players.Count > 1) break;
                             if (CurrentAttempt.Skippable) Skip();
                             else if (settings.SpaceToPause) beginPause();
                         }
@@ -1398,7 +1398,7 @@ public partial class LegacyRunner : BaseScene
 
             if (CurrentAttempt.PassedNotes >= CurrentAttempt.Map.Notes.Length)
             {
-                CurrentAttempt.Progress = SoundManager.Song.Stream.GetLength() * 1000;
+                CurrentAttempt.Progress = SoundManager.Song.TotalTime.Milliseconds;
             }
             else
             {
@@ -1408,13 +1408,13 @@ public partial class LegacyRunner : BaseScene
 
                 if (CurrentAttempt.Map.AudioBuffer != null)
                 {
-                    if (!SoundManager.Song.Playing)
+                    if (!SoundManager.Song.IsPlaying)
                     {
                         SoundManager.Song.Play();
                     }
 
                     double targetTime = Math.Max(0, CurrentAttempt.Progress + settings.LocalOffset.Value);
-                    SoundManager.Song.Seek((float)targetTime / 1000);
+                    SoundManager.Song.Seek((float)targetTime);
                     video.StreamPosition = (float)targetTime / 1000;
                 }
             }
@@ -1505,7 +1505,7 @@ public partial class LegacyRunner : BaseScene
 
     private static void stopGameplayMedia()
     {
-        if (CurrentAttempt.Map.AudioBuffer != null && SoundManager.Song.Playing)
+        if (CurrentAttempt.Map.AudioBuffer != null && SoundManager.Song.IsPlaying)
         {
             SoundManager.Song.Stop();
         }
@@ -1525,12 +1525,12 @@ public partial class LegacyRunner : BaseScene
 
         if (CurrentAttempt.Map.AudioBuffer != null && audioTime >= 0 && CurrentAttempt.Progress < MapLength)
         {
-            SoundManager.Song.VolumeDb = targetVolumeDb;
+            SoundManager.Song.Volume = targetVolumeDb;
 
-            if (!musicStarted || !SoundManager.Song.Playing)
+            if (!musicStarted || !SoundManager.Song.IsPlaying)
             {
                 SoundManager.Song.Play();
-                SoundManager.Song.Seek((float)audioTime / 1000);
+                SoundManager.Song.Seek((float)audioTime);
                 musicStarted = true;
             }
         }
@@ -1610,7 +1610,8 @@ public partial class LegacyRunner : BaseScene
         pauseHoldTime = 0;
         pauseCooldown = pauseCooldownDuration;
         pauseHudControl.SetProgress(1);
-        SoundManager.Song.VolumeDb = getTargetMusicVolumeDb();
+        // FIXME: Fix this
+        // SoundManager.Song.Volume = getTargetMusicVolumeDb();
         Playing = true;
         updatePauseHudVisualState();
     }
@@ -1632,9 +1633,10 @@ public partial class LegacyRunner : BaseScene
         pauseState = Math.Max(0, pauseState - (float)(delta / pauseHoldDuration));
         pauseHudControl.SetProgress(Math.Clamp(1f - pauseState, 0f, 1f));
 
-        if (CurrentAttempt.Map.AudioBuffer != null && musicStarted && SoundManager.Song.Playing && getTargetMusicVolumeDb() > float.NegativeInfinity)
+        if (CurrentAttempt.Map.AudioBuffer != null && musicStarted && SoundManager.Song.IsPlaying)
         {
-            SoundManager.Song.VolumeDb = Mathf.Lerp(getTargetMusicVolumeDb() - 60, getTargetMusicVolumeDb(), 1 - pauseState);
+            // FIXME: fix this
+            // SoundManager.Song.Volume = Mathf.Lerp(getTargetMusicVolumeDb() - 60, getTargetMusicVolumeDb(), 1 - pauseState);
         }
 
         if (pauseState == 0)

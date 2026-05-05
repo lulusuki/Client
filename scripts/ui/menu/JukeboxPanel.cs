@@ -65,9 +65,9 @@ public partial class JukeboxPanel : Panel, ISkinnable
     {
         float progress = 0;
 
-        if (SoundManager.Song.Stream != null)
+        if (SoundManager.Song.HasSound)
         {
-            progress = SoundManager.Song.GetPlaybackPosition() / (float)SoundManager.Song.Stream.GetLength();
+            progress = SoundManager.Song.CurrentTime.Milliseconds / SoundManager.Song.TotalTime.Milliseconds;
         }
 
         spectrumMaterial.SetShaderParameter("progress", progress);
@@ -155,7 +155,7 @@ public partial class JukeboxPanel : Panel, ISkinnable
             return;
         }
 
-        if (SoundManager.Song.GetPlaybackPosition() < 2)
+        if (SoundManager.Song.CurrentTime.Seconds < 2)
         {
             SoundManager.JukeboxIndex--;
             SoundManager.PlayJukebox(SoundManager.JukeboxIndex);

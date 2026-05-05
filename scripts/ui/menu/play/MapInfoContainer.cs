@@ -174,9 +174,9 @@ public partial class MapInfoContainer : Panel, ISkinnable
 
             Lobby.SetSpeed(value);
 
-            if (SoundManager.Map?.Name == Map.Name && SoundManager.Song.Playing)
+            if (SoundManager.Map?.Name == Map.Name && SoundManager.Song.IsPlaying)
             {
-                SoundManager.Song.PitchScale = (float)Lobby.Speed;
+                SoundManager.Song.Tempo = (float)Lobby.Speed;
             }
         }
 
@@ -239,9 +239,9 @@ public partial class MapInfoContainer : Panel, ISkinnable
                 SoundManager.StartMapSelectionPlayback(Map);
             }
 
-            if (seek && SoundManager.Song.Playing)
+            if (seek && SoundManager.Song.IsPlaying)
             {
-                SoundManager.Song.Seek((float)Lobby.StartFrom / 1000);
+                SoundManager.Song.Seek((float)Lobby.StartFrom);
             }
         }
 

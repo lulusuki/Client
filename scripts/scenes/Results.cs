@@ -67,13 +67,13 @@ public partial class Results : BaseScene
 
         if (SettingsManager.Instance.Settings.AutoplayJukebox.Value && LegacyRunner.CurrentAttempt.Map.AudioBuffer != null)
         {
-            if (!SoundManager.Song.Playing)
+            if (!SoundManager.Song.IsPlaying)
             {
                 SoundManager.Song.Play();
             }
         }
 
-        SoundManager.Song.PitchScale = (float)LegacyRunner.CurrentAttempt.Speed;
+        SoundManager.Song.Tempo = (float)LegacyRunner.CurrentAttempt.Speed;
 
         if (!LegacyRunner.CurrentAttempt.Map.Ephemeral)
         {
@@ -161,7 +161,7 @@ public partial class Results : BaseScene
 
     public void UpdateVolume()
     {
-        SoundManager.Song.VolumeDb = (float)SoundManager.ComputeVolumeDb((float)settings.VolumeMusic.Value, (float)settings.VolumeMaster.Value, 70);
+        SoundManager.Song.Volume = (float)SoundManager.ComputeVolumeDb((float)settings.VolumeMusic.Value, (float)settings.VolumeMaster.Value, 70);
     }
 
     public void Replay()
@@ -180,7 +180,7 @@ public partial class Results : BaseScene
             SoundManager.StopScopedSession();
         }
 
-        SoundManager.Song.PitchScale = (float)Lobby.Speed;
+        SoundManager.Song.Tempo = (float)Lobby.Speed;
         SoundManager.UpdateVolume();
         SceneManager.Load("res://scenes/main_menu.tscn");
     }

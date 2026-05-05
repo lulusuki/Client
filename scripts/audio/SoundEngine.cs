@@ -1,0 +1,372 @@
+﻿// Sound-Space-Quantum-Editor
+// Copyright(C) 2027 Avibah
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+// Derivative from https://github.com/Avibah/Sound-Space-Quantum-Editor
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using SoundFlow.Abstracts.Devices;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Backends.MiniAudio.Devices;
+using SoundFlow.Backends.MiniAudio.Enums;
+using SoundFlow.Codecs.FFMpeg;
+using SoundFlow.Enums;
+using SoundFlow.Interfaces;
+using SoundFlow.Providers;
+using SoundFlow.Structs;
+using SoundFlow.Utils;
+using Player = SoundFlow.Components.SoundPlayer;
+
+#nullable enable
+
+/// <summary>
+/// "Sound" in <see cref="InitializeSound(string)"/> and <see cref="PlaySound(string, float)"/> refers to a short audio clip to be played many times, possibly overlapping.
+/// These do not support tempo changes.
+/// <para></para>
+/// "Music" in <see cref="InitializeMusic(string, out string)"/> and <see cref="EncodeMusic(Player, string)"/> refers to a long audio file that will be loaded once and not need to play over itself.
+/// These support tempo changes and use <see cref="TempoProvider"/> as their <see cref="ISoundDataProvider"/> in each initialized <see cref="Player"/>.
+/// </summary>
+public class SoundEngine
+{
+    /// <summary>
+    /// Initial queue size for sounds initialized with <see cref="InitializeSound(string)"/>
+    /// <para></para>
+    /// More copies of these sounds will be cached as needed
+    /// </summary>
+    private const int initial_cache_size = 8;
+    /// <summary>
+    /// Global volume multiplier for sounds
+    /// </summary>
+    public const float VOLUME_MULT = 2;
+    /// <summary>
+    /// Sample rate that all loaded sounds will be resampled to
+    /// </summary>
+    public const int SAMPLE_RATE = 44100;
+    /// <summary>
+    /// How often samples are read from the currently playing sound(s)
+    /// <para></para>
+    /// Time update frequency is 1 / PERIOD_MILLISECONDS Hz
+    /// </summary>
+    public const int PERIOD_MILLISECONDS = 4;
+
+    private static readonly AudioFormat format = new()
+    {
+        SampleRate = SAMPLE_RATE,
+        Channels = 2,
+        Format = SampleFormat.F32
+    };
+
+    private static readonly FFmpegCodecFactory ffmpeg_factory = new();
+
+    /// <summary>
+    /// All supported file extensions in this engine, including periods
+    /// </summary>
+    public static IReadOnlyCollection<string> SupportedExtensions => [.. ffmpeg_factory.SupportedFormatIds.Concat(["egg", "asset"]).Select((e) => "." + e)];
+    /// <summary>
+    /// All supported file extensions in this engine, formatted as *.abc;*.def;...;*.xyz
+    /// </summary>
+    public static string SupportedExtensionsString => string.Join(';', SupportedExtensions.Select((e) => "*" + e));
+
+    private static readonly MiniAudioEngine engine;
+    private static readonly AudioPlaybackDevice device;
+
+    private static readonly Dictionary<string, Queue<Player>> cache = [];
+    private static readonly Dictionary<string, ISoundDataProvider> providers = [];
+
+    static SoundEngine()
+    {
+        engine = new();
+        engine.RegisterCodecFactory(ffmpeg_factory);
+        engine.SetCodecPriority(ffmpeg_factory.FactoryId, -1);
+        engine.UpdateAudioDevicesInfo();
+
+        device = engine.InitializePlaybackDevice(null, format, new MiniAudioDeviceConfig()
+        {
+            Wasapi = new() { Usage = WasapiUsage.ProAudio },
+            PeriodSizeInMilliseconds = PERIOD_MILLISECONDS
+        });
+        device.Start();
+    }
+
+    private static float[] getResampledData(string filename, bool sourceIsMusic, out string fileType, bool retrying = false)
+    {
+        byte[] bytes = File.ReadAllBytes(filename);
+
+        return getResampleData(bytes, sourceIsMusic, out fileType, retrying);
+    }
+
+    private static float[] getResampleData(byte[] bytes, bool sourceIsMusic, out string fileType, bool retrying = false)
+    {
+        engine.SetCodecPriority(ffmpeg_factory.FactoryId, retrying ? -1 : 100);
+        using MemoryStream stream = new(bytes);
+
+        ISoundDataProvider provider = sourceIsMusic ? new StreamDataProvider(engine, stream) : new AssetDataProvider(engine, stream);
+        fileType = provider.FormatInfo?.FormatName.ToLower() ?? "";
+
+        List<float> parsed = new(provider.Length);
+        float[] buffer = new float[provider.SampleRate];
+
+        int samples = 0;
+
+        while ((samples = provider.ReadBytes(buffer)) > 0)
+        {
+            if (samples < buffer.Length)
+            {
+                float[] sizedBuffer = new float[samples];
+                Array.Copy(buffer, sizedBuffer, samples);
+                parsed.AddRange(sizedBuffer);
+            }
+            else
+                parsed.AddRange(buffer);
+        }
+
+        float[] data = [.. parsed];
+        parsed = [];
+
+        if ((provider.FormatInfo?.ChannelCount ?? 2) == 1)
+        {
+            float[] stereoData = new float[data.Length * 2];
+
+            for (int i = 0; i < data.Length; i++)
+            {
+                stereoData[i * 2 + 0] = data[i];
+                stereoData[i * 2 + 1] = data[i];
+            }
+
+            data = stereoData;
+        }
+
+        float[] resampled = MathHelper.ResampleLinear(data, provider.FormatInfo?.ChannelCount ?? 2, provider.SampleRate, format.SampleRate);
+        data = [];
+
+        if (IsMono)
+        {
+            for (int i = 0; i < resampled.Length; i += 2)
+            {
+                float left = resampled[i];
+                float right = resampled[i + 1];
+                float mid = (left + right) / 2;
+
+                resampled[i] = mid;
+                resampled[i + 1] = mid;
+            }
+        }
+
+        for (int i = 0; i < resampled.Length; i++)
+        {
+            if (float.IsNaN(resampled[i]))
+            {
+                if (retrying)
+                    throw new InvalidDataException("Corrupted sample data");
+
+                provider.Dispose();
+                return getResampleData(bytes, sourceIsMusic, out fileType, true);
+            }
+        }
+
+        provider.Dispose();
+        return resampled;
+    }
+
+    private static void enqueueNewSound(string filename)
+    {
+        if (!providers.TryGetValue(filename, out ISoundDataProvider? provider))
+            provider = new RawDataProvider(getResampledData(filename, false, out _));
+
+        Queue<Player> queue = cache[filename];
+        Player player = new(engine, format, provider);
+        device.MasterMixer.AddComponent(player);
+
+        player.PlaybackEnded += (s, e) =>
+        {
+            player.Stop();
+            queue.Enqueue(player);
+        };
+
+        queue.Enqueue(player);
+    }
+
+    /// <summary>
+    /// Prepare an initial queue for a sound at <paramref name="filename"/>
+    /// </summary>
+    /// <param name="filename">The file to initialize as a repeatable sound</param>
+    public static void InitializeSound(string filename)
+    {
+        if (!cache.TryAdd(filename, []))
+            cache[filename] = [];
+
+        for (int i = 0; i < initial_cache_size; i++)
+            enqueueNewSound(filename);
+    }
+
+    /// <summary>
+    /// Play the sound at <paramref name="filename"/>, initializing it if necessary
+    /// </summary>
+    /// <param name="filename">The file the sound is at, equivalent to </param>
+    /// <param name="volume">The volume to play this sound at</param>
+    public static void PlaySound(string filename, float volume = 1)
+    {
+        volume *= VOLUME_MULT;
+
+        if (!cache.TryGetValue(filename, out Queue<Player>? queue))
+        {
+            InitializeSound(filename);
+            queue = cache[filename];
+        }
+
+        try
+        {
+            if (queue.Count == 0)
+                enqueueNewSound(filename);
+
+            Player player = queue.Dequeue();
+            // TODO: Add a way to mute audio with a setting / keybind
+            player.Mute = false;
+            if (player.Volume != volume)
+                player.Volume = volume;
+            player.Play();
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Load a music file from <paramref name="filename"/> and return its <see cref="Player"/>
+    /// </summary>
+    /// <param name="filename">The file to load music from</param>
+    /// <param name="fileType">The audio format associated with this file, not the same as the file extension!</param>
+    /// <returns>A <see cref="Player"/> containing the loaded music with a <see cref="TempoProvider"/> as its <see cref="ISoundDataProvider"/></returns>
+    public static Player InitializeMusic(string filename, out string fileType)
+    {
+        TempoProvider provider = new(getResampledData(filename, true, out fileType), format);
+        Player player = new(engine, format, provider);
+
+        device.MasterMixer.AddComponent(player);
+        return player;
+    }
+
+    /// <inheritdoc cref="InitializeMusic(string, out string)"/>
+    /// <param name="buffer">The audio buffer to load music from</param>
+    /// <param name="fileType">The audio format associated with this file, not the same as the file extension!</param>
+    public static Player InitializeMusic(byte[] buffer, out string fileType)
+    {
+        TempoProvider provider = new(getResampleData(buffer, true, out fileType), format);
+        Player player = new(engine, format, provider);
+
+        device.MasterMixer.AddComponent(player);
+        return player;
+    }
+
+    /// <summary>
+    /// Dispose a <see cref="Player"/> and its provider, removing it from the active playback device
+    /// </summary>
+    /// <param name="player">The <see cref="Player"/> to dispose of</param>
+    public static void DisposePlayer(Player player)
+    {
+        device.MasterMixer.RemoveComponent(player);
+
+        player.DataProvider.Dispose();
+        player.Dispose();
+    }
+
+    /// <summary>
+    /// Whether sounds should play in Mono (single-channel)
+    /// </summary>
+    public static bool IsMono { get; private set; }
+
+    /// <summary>
+    /// Sets whether sounds should play in Mono (single-channel)
+    /// <para></para>
+    /// Note that this will re-initialize all loaded sounds, and it WILL NOT re-initialize music!
+    /// </summary>
+    /// <param name="mono">Whether sounds should play in Mono</param>
+    public static void SetMono(bool mono)
+    {
+        if (mono == IsMono)
+            return;
+        IsMono = mono;
+
+        string[] sounds = [.. cache.Keys];
+
+        foreach (Queue<Player> queue in cache.Values)
+        {
+            foreach (Player player in queue)
+                DisposePlayer(player);
+        }
+        cache.Clear();
+
+        foreach (string sound in sounds)
+            InitializeSound(sound);
+    }
+
+    /// <summary>
+    /// Encode <paramref name="player"/> as an MP3 file to <paramref name="filename"/>
+    /// </summary>
+    /// <param name="player">The <see cref="Player"/> to encode to an MP3</param>
+    /// <param name="filename">The destination file for the encoded MP3</param>
+    /// <returns>Whether encoding succeeded</returns>
+    public static bool EncodeMusic(Player player, string filename)
+    {
+        try
+        {
+            if (player.DataProvider is not TempoProvider provider)
+                return false;
+
+            using Stream stream = File.OpenWrite(filename);
+            ISoundEncoder? encoder = ffmpeg_factory.CreateEncoder(stream, "mp3", format);
+            if (encoder == null)
+                return false;
+
+            provider.Seek(0);
+
+            float[] buffer = new float[SAMPLE_RATE];
+            int samples = 0;
+
+            while ((samples = provider.ReadBytesRaw(buffer)) > 0)
+            {
+                float[] data = buffer;
+
+                if (samples < buffer.Length)
+                {
+                    data = new float[samples];
+                    Array.Copy(buffer, data, samples);
+                }
+
+                encoder.Encode(data);
+            }
+
+            encoder.Dispose();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"MP3 encoding failed: {ex.Message}");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Safely dispose resources for this engine and its playback device
+    /// </summary>
+    public static void Dispose()
+    {
+        device.Stop();
+        device.Dispose();
+        engine.Dispose();
+    }
+}
